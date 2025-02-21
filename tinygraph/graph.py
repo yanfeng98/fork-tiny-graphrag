@@ -10,10 +10,8 @@ from .utils import (
     create_file_if_not_exists,
 )
 from .llm.base import BaseLLM
-from .embedding.base import BaseEmb
 from .prompt import *
-from typing import Dict, List, Optional, Tuple, Union
-import numpy as np
+from typing import Dict, List
 from collections import defaultdict
 import json
 
@@ -57,7 +55,7 @@ class TinyGraph:
         - emb: 嵌入模型（Embedding）实例
         - working_dir: 工作目录，默认为"workspace"
         """
-        self.driver = driver = GraphDatabase.driver(
+        self.driver = GraphDatabase.driver(
             url, auth=(username, password)
         )  # 创建Neo4j数据库驱动
         self.llm = llm  # 设置语言模型
@@ -77,6 +75,14 @@ class TinyGraph:
 
         # 加载已加载的文档
         self.loaded_documents = self.get_loaded_documents()
+
+    def get_loaded_documents(self):
+        try:
+            with open(self.doc_path, "r", encoding="utf-8") as file:
+                lines = file.readlines()
+                return set(line.strip() for line in lines)
+        except:
+            raise FileNotFoundError("Cache file not found.")
 
     def create_triplet(self, subject: dict, predicate, object: dict) -> None:
         """
@@ -114,40 +120,6 @@ class TinyGraph:
             )
 
         return
-
-    def split_text(self,file_path:str, segment_length=300, overlap_length=50) -> Dict:
-        """
-        将文本文件分割成多个片段，每个片段的长度为segment_length，相邻片段之间有overlap_length的重叠。
-
-        参数:
-        - file_path: 文本文件的路径
-        - segment_length: 每个片段的长度，默认为300
-        - overlap_length: 相邻片段之间的重叠长度，默认为50
-
-        返回:
-        - 包含片段ID和片段内容的字典
-        """
-        chunks = {}  # 用于存储片段的字典
-        with open(file_path, "r", encoding="utf-8") as file:
-            content = file.read()  # 读取文件内容
-
-        text_segments = []  # 用于存储分割后的文本片段
-        start_index = 0  # 初始化起始索引
-
-        # 循环分割文本，直到剩余文本长度不足以形成新的片段
-        while start_index + segment_length <= len(content):
-            text_segments.append(content[start_index : start_index + segment_length])
-            start_index += segment_length - overlap_length  # 更新起始索引，考虑重叠长度
-
-        # 处理剩余的文本，如果剩余文本长度小于segment_length但大于0
-        if start_index < len(content):
-            text_segments.append(content[start_index:])
-
-        # 为每个片段生成唯一的ID，并将其存储在字典中
-        for segement in text_segments:
-            chunks.update({compute_mdhash_id(segement, prefix="chunk-"): segement})
-
-        return chunks
 
     def get_entity(self, text: str, chunk_id: str) -> List[Dict]:
         """
@@ -362,6 +334,40 @@ class TinyGraph:
         self.add_loaded_documents(filepath)
         print(f"doc '{filepath}' has been loaded.")
 
+    def split_text(self,file_path:str, segment_length=300, overlap_length=50) -> Dict:
+        """
+        将文本文件分割成多个片段，每个片段的长度为segment_length，相邻片段之间有overlap_length的重叠。
+
+        参数:
+        - file_path: 文本文件的路径
+        - segment_length: 每个片段的长度，默认为300
+        - overlap_length: 相邻片段之间的重叠长度，默认为50
+
+        返回:
+        - 包含片段ID和片段内容的字典
+        """
+        chunks = {}  # 用于存储片段的字典
+        with open(file_path, "r", encoding="utf-8") as file:
+            content = file.read()  # 读取文件内容
+
+        text_segments = []  # 用于存储分割后的文本片段
+        start_index = 0  # 初始化起始索引
+
+        # 循环分割文本，直到剩余文本长度不足以形成新的片段
+        while start_index + segment_length <= len(content):
+            text_segments.append(content[start_index : start_index + segment_length])
+            start_index += segment_length - overlap_length  # 更新起始索引，考虑重叠长度
+
+        # 处理剩余的文本，如果剩余文本长度小于segment_length但大于0
+        if start_index < len(content):
+            text_segments.append(content[start_index:])
+
+        # 为每个片段生成唯一的ID，并将其存储在字典中
+        for segement in text_segments:
+            chunks.update({compute_mdhash_id(segement, prefix="chunk-"): segement})
+
+        return chunks
+
     def detect_communities(self) -> None:
         query = """
         CALL gds.graph.project(
@@ -560,14 +566,6 @@ class TinyGraph:
                 "Community schema not found. Please make sure to generate it first."
             )
         return community_schema
-
-    def get_loaded_documents(self):
-        try:
-            with open(self.doc_path, "r", encoding="utf-8") as file:
-                lines = file.readlines()
-                return set(line.strip() for line in lines)
-        except:
-            raise FileNotFoundError("Cache file not found.")
 
     def add_loaded_documents(self, file_path):
         if file_path in self.loaded_documents:
