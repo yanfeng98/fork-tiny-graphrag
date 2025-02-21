@@ -15,8 +15,8 @@ Tiny-Graphrag 需要以下版本的 Neo4j 和 JDK，以及 GDS 插件：
 首先克隆仓库：
 
 ```shell
-git clone https://github.com/limafang/tiny-graphrag.git
-cd tiny-graphrag
+git clone git@github.com:yanfeng98/fork-tiny-graphrag.git
+cd fork-tiny-graphrag
 ```
 
 安装必要依赖：
