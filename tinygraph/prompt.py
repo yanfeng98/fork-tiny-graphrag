@@ -1,37 +1,3 @@
-GEN_NODES = """
-## Goal
-Please identify and extract triplet information from the provided article, focusing only on entities and relationships related to significant knowledge points. 
-Each triplet should be in the form of (Subject, Predicate, Object). 
-Follow these guidelines:
-
-1. **Subject:** Concepts in Bayesian Optimization
-2. **Predicate:** The action or relationship that links the subject to the object.
-3. **Object:** Concepts in Bayesian Optimization that is affected by or related to the action of the subject.
-
-## Example
-For the sentence "Gaussian Processes are used to model the objective function in Bayesian Optimization" the triplet would be:
-
-<triplet><subject>Gaussian Processes</subject><predicate>are used to model the objective function in</predicate><object>Bayesian Optimization</object></triplet>
-
-For the sentence "John read a book on the weekend," which is not related to any knowledge points, no triplet should be extracted.
-
-## Instructions
-1. Read through the article carefully.
-2. Think step by step. Try to find some useful knowledge points from the article. You need to reorganize the content of the sentence into corresponding knowledge points.
-3. Identify key sentences that contain relevant triplet information related to significant knowledge points.
-4. Extract and format the triplets as per the given example, excluding any information that is not relevant to significant knowledge points.
-
-## Output Format
-For each identified triplet, provide:
-<triplet><subject>[Entity]</subject><predicate>The action or relationship</predicate><object>The entity</object></triplet>
-
-## Article
-
-{text}
-
-## Your response
-"""
-
 GET_ENTITY = """
 ## Goal
 
@@ -72,50 +38,6 @@ Wrap each concept in the HTML tag <concept>, and include the name of the concept
 ## Article
 
 {text}
-
-## Your response
-"""
-
-
-ENTITY_DISAMBIGUATION = """
-## Goal
-Given multiple entities with the same name, determine if they can be merged into a single entity. If merging is possible, provide the transformation from entity id to entity id.
-
-## Guidelines
-1. **Entities:** A list of entities with the same name.
-2. **Merge:** Determine if the entities can be merged into a single entity.
-3. **Transformation:** If merging is possible, provide the transformation from entity id to entity id.
-
-## Example
-1. Entities:
-   [
-       {"name": "Entity A", "entity id": "entity-1"},
-       {"name": "Entity A", "entity id": "entity-2"},
-       {"name": "Entity A", "entity id": "entity-3"}
-   ]
-   
-Your response should be:
-
-<transformation>{"entity-2": "entity-1", "entity-3": "entity-1"}</transformation>
-
-
-2. Entities:
-   [
-       {"name": "Entity B", "entity id": "entity-4"},
-       {"name": "Entity C", "entity id": "entity-5"},
-       {"name": "Entity B", "entity id": "entity-6"}
-   ]
-
-Your response should be:
-
-<transformation>None</transformation>
-
-## Output Format
-Provide the following information:
-- Transformation: A dictionary mapping entity ids to the final entity id after merging.
-
-## Given Entities
-{entities}
 
 ## Your response
 """
@@ -170,6 +92,40 @@ For each identified triplet, provide:
 - If there are similar concepts, please rewrite them into a form that suits our requirements.
 
 ## Your response:
+"""
+
+GEN_NODES = """
+## Goal
+Please identify and extract triplet information from the provided article, focusing only on entities and relationships related to significant knowledge points. 
+Each triplet should be in the form of (Subject, Predicate, Object). 
+Follow these guidelines:
+
+1. **Subject:** Concepts in Bayesian Optimization
+2. **Predicate:** The action or relationship that links the subject to the object.
+3. **Object:** Concepts in Bayesian Optimization that is affected by or related to the action of the subject.
+
+## Example
+For the sentence "Gaussian Processes are used to model the objective function in Bayesian Optimization" the triplet would be:
+
+<triplet><subject>Gaussian Processes</subject><predicate>are used to model the objective function in</predicate><object>Bayesian Optimization</object></triplet>
+
+For the sentence "John read a book on the weekend," which is not related to any knowledge points, no triplet should be extracted.
+
+## Instructions
+1. Read through the article carefully.
+2. Think step by step. Try to find some useful knowledge points from the article. You need to reorganize the content of the sentence into corresponding knowledge points.
+3. Identify key sentences that contain relevant triplet information related to significant knowledge points.
+4. Extract and format the triplets as per the given example, excluding any information that is not relevant to significant knowledge points.
+
+## Output Format
+For each identified triplet, provide:
+<triplet><subject>[Entity]</subject><predicate>The action or relationship</predicate><object>The entity</object></triplet>
+
+## Article
+
+{text}
+
+## Your response
 """
 
 TEST_PROMPT = """

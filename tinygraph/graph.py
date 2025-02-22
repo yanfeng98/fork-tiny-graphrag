@@ -84,118 +84,7 @@ class TinyGraph:
         except:
             raise FileNotFoundError("Cache file not found.")
 
-    def create_triplet(self, subject: dict, predicate, object: dict) -> None:
-        """
-        创建一个三元组（Triplet）并将其存储到Neo4j数据库中。
-
-        参数:
-        - subject: 主题实体的字典，包含名称、描述、块ID和实体ID
-        - predicate: 关系名称
-        - object: 对象实体的字典，包含名称、描述、块ID和实体ID
-
-        返回:
-        - 查询结果
-        """
-        # 定义Cypher查询语句，用于创建或合并实体节点和关系
-        query = (
-            "MERGE (a:Entity {name: $subject_name, description: $subject_desc, chunks_id: $subject_chunks_id, entity_id: $subject_entity_id}) "
-            "MERGE (b:Entity {name: $object_name, description: $object_desc, chunks_id: $object_chunks_id, entity_id: $object_entity_id}) "
-            "MERGE (a)-[r:Relationship {name: $predicate}]->(b) "
-            "RETURN a, b, r"
-        )
-
-        # 使用数据库会话执行查询
-        with self.driver.session() as session:
-            result = session.run(
-                query,
-                subject_name=subject["name"],
-                subject_desc=subject["description"],
-                subject_chunks_id=subject["chunks id"],
-                subject_entity_id=subject["entity id"],
-                object_name=object["name"],
-                object_desc=object["description"],
-                object_chunks_id=object["chunks id"],
-                object_entity_id=object["entity id"],
-                predicate=predicate,
-            )
-
-        return
-
-    def get_entity(self, text: str, chunk_id: str) -> List[Dict]:
-        """
-        从给定的文本中提取实体，并为每个实体生成唯一的ID和描述。
-
-        参数:
-        - text: 输入的文本
-        - chunk_id: 文本块的ID
-
-        返回:
-        - 包含提取的实体信息的列表
-        """
-        # 使用语言模型预测实体信息
-        data = self.llm.predict(GET_ENTITY.format(text=text))
-        concepts = []  # 用于存储提取的实体信息
-
-        # 从预测结果中提取实体信息
-        for concept_html in get_text_inside_tag(data, "concept"):
-            concept = {}
-            concept["name"] = get_text_inside_tag(concept_html, "name")[0].strip()
-            concept["description"] = get_text_inside_tag(concept_html, "description")[
-                0
-            ].strip()
-            concept["chunks id"] = [chunk_id]
-            concept["entity id"] = compute_mdhash_id(
-                concept["description"], prefix="entity-"
-            )
-            concepts.append(concept)
-
-        return concepts
-
-    def get_triplets(self, content, entity: list) -> List[Dict]:
-        """
-        从给定的内容中提取三元组（Triplet）信息，并返回包含这些三元组信息的列表。
-
-        参数:
-        - content: 输入的内容
-        - entity: 实体列表
-
-        返回:
-        - 包含提取的三元组信息的列表
-        """
-        try:
-            # 使用语言模型预测三元组信息
-            data = self.llm.predict(GET_TRIPLETS.format(text=content, entity=entity))
-            data = get_text_inside_tag(data, "triplet")
-        except Exception as e:
-            print(f"Error predicting triplets: {e}")
-            return []
-
-        res = []  # 用于存储提取的三元组信息
-
-        # 从预测结果中提取三元组信息
-        for triplet_data in data:
-            try:
-                subject = get_text_inside_tag(triplet_data, "subject")[0]
-                subject_id = get_text_inside_tag(triplet_data, "subject_id")[0]
-                predicate = get_text_inside_tag(triplet_data, "predicate")[0]
-                object = get_text_inside_tag(triplet_data, "object")[0]
-                object_id = get_text_inside_tag(triplet_data, "object_id")[0]
-                res.append(
-                    {
-                        "subject": subject,
-                        "subject_id": subject_id,
-                        "predicate": predicate,
-                        "object": object,
-                        "object_id": object_id,
-                    }
-                )
-            except Exception as e:
-                print(f"Error extracting triplet: {e}")
-                continue
-
-        return res
-
-    def add_document(self, filepath, use_llm_deambiguation=False) -> None:
+    def add_document(self, filepath) -> None:
         """
         将文档添加到系统中，执行以下步骤：
         1. 检查文档是否已经加载。
@@ -207,7 +96,6 @@ class TinyGraph:
 
         参数:
         - filepath: 要添加的文档的路径
-        - use_llm_deambiguation: 是否使用LLM进行实体消岐
         """
         # ================ Check if the document has been loaded ================
         if filepath in self.get_loaded_documents():
@@ -253,26 +141,11 @@ class TinyGraph:
             f"{len(all_entities)} entities and {len(all_triplets)} triplets have been extracted."
         )
         # ================ Entity Disambiguation ================
-        entity_names = list(set(entity["name"] for entity in all_entities))
-
-        if use_llm_deambiguation:
-            entity_id_mapping = {}
-            for name in entity_names:
-                same_name_entities = [
-                    entity for entity in all_entities if entity["name"] == name
-                ]
-                transform_text = self.llm.predict(
-                    ENTITY_DISAMBIGUATION.format(same_name_entities)
-                )
-                entity_id_mapping.update(
-                    get_text_inside_tag(transform_text, "transform")
-                )
-        else:
-            entity_id_mapping = {}
-            for entity in all_entities:
-                entity_name = entity["name"]
-                if entity_name not in entity_id_mapping:
-                    entity_id_mapping[entity_name] = entity["entity id"]
+        entity_id_mapping = {}
+        for entity in all_entities:
+            entity_name = entity["name"]
+            if entity_name not in entity_id_mapping:
+                entity_id_mapping[entity_name] = entity["entity id"]
 
         for entity in all_entities:
             entity["entity id"] = entity_id_mapping.get(
@@ -367,6 +240,117 @@ class TinyGraph:
             chunks.update({compute_mdhash_id(segement, prefix="chunk-"): segement})
 
         return chunks
+
+    def get_entity(self, text: str, chunk_id: str) -> List[Dict]:
+        """
+        从给定的文本中提取实体，并为每个实体生成唯一的ID和描述。
+
+        参数:
+        - text: 输入的文本
+        - chunk_id: 文本块的ID
+
+        返回:
+        - 包含提取的实体信息的列表
+        """
+        # 使用语言模型预测实体信息
+        data = self.llm.predict(GET_ENTITY.format(text=text))
+        concepts = []  # 用于存储提取的实体信息
+
+        # 从预测结果中提取实体信息
+        for concept_html in get_text_inside_tag(data, "concept"):
+            concept = {}
+            concept["name"] = get_text_inside_tag(concept_html, "name")[0].strip()
+            concept["description"] = get_text_inside_tag(concept_html, "description")[
+                0
+            ].strip()
+            concept["chunks id"] = [chunk_id]
+            concept["entity id"] = compute_mdhash_id(
+                concept["description"], prefix="entity-"
+            )
+            concepts.append(concept)
+
+        return concepts
+    
+    def get_triplets(self, content, entity: list) -> List[Dict]:
+        """
+        从给定的内容中提取三元组（Triplet）信息，并返回包含这些三元组信息的列表。
+
+        参数:
+        - content: 输入的内容
+        - entity: 实体列表
+
+        返回:
+        - 包含提取的三元组信息的列表
+        """
+        try:
+            # 使用语言模型预测三元组信息
+            data = self.llm.predict(GET_TRIPLETS.format(text=content, entity=entity))
+            data = get_text_inside_tag(data, "triplet")
+        except Exception as e:
+            print(f"Error predicting triplets: {e}")
+            return []
+
+        res = []  # 用于存储提取的三元组信息
+
+        # 从预测结果中提取三元组信息
+        for triplet_data in data:
+            try:
+                subject = get_text_inside_tag(triplet_data, "subject")[0]
+                subject_id = get_text_inside_tag(triplet_data, "subject_id")[0]
+                predicate = get_text_inside_tag(triplet_data, "predicate")[0]
+                object = get_text_inside_tag(triplet_data, "object")[0]
+                object_id = get_text_inside_tag(triplet_data, "object_id")[0]
+                res.append(
+                    {
+                        "subject": subject,
+                        "subject_id": subject_id,
+                        "predicate": predicate,
+                        "object": object,
+                        "object_id": object_id,
+                    }
+                )
+            except Exception as e:
+                print(f"Error extracting triplet: {e}")
+                continue
+
+        return res
+    
+    def create_triplet(self, subject: dict, predicate, object: dict) -> None:
+        """
+        创建一个三元组（Triplet）并将其存储到Neo4j数据库中。
+
+        参数:
+        - subject: 主题实体的字典，包含名称、描述、块ID和实体ID
+        - predicate: 关系名称
+        - object: 对象实体的字典，包含名称、描述、块ID和实体ID
+
+        返回:
+        - 查询结果
+        """
+        # 定义Cypher查询语句，用于创建或合并实体节点和关系
+        query = (
+            "MERGE (a:Entity {name: $subject_name, description: $subject_desc, chunks_id: $subject_chunks_id, entity_id: $subject_entity_id}) "
+            "MERGE (b:Entity {name: $object_name, description: $object_desc, chunks_id: $object_chunks_id, entity_id: $object_entity_id}) "
+            "MERGE (a)-[r:Relationship {name: $predicate}]->(b) "
+            "RETURN a, b, r"
+        )
+
+        # 使用数据库会话执行查询
+        with self.driver.session() as session:
+            result = session.run(
+                query,
+                subject_name=subject["name"],
+                subject_desc=subject["description"],
+                subject_chunks_id=subject["chunks id"],
+                subject_entity_id=subject["entity id"],
+                object_name=object["name"],
+                object_desc=object["description"],
+                object_chunks_id=object["chunks id"],
+                object_entity_id=object["entity id"],
+                predicate=predicate,
+            )
+
+        return
 
     def detect_communities(self) -> None:
         query = """
