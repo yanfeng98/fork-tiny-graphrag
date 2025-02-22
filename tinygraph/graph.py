@@ -351,6 +351,12 @@ class TinyGraph:
             )
 
         return
+    
+    def gen_community(self):
+        self.detect_communities()
+        community_schema = self.gen_community_schema()
+        with open(self.community_path, "w", encoding="utf-8") as file:
+            json.dump(community_schema, file, indent=4)
 
     def detect_communities(self) -> None:
         query = """
@@ -385,6 +391,134 @@ class TinyGraph:
                     f"社区数量: {record['communityCount']}, 模块度: {record['modularity']}"
                 )
             session.run("CALL gds.graph.drop('graph_help')")
+
+    def gen_community_schema(self) -> dict[str, dict]:
+        results = defaultdict(
+            lambda: dict(
+                level=None,
+                title=None,
+                edges=set(),
+                nodes=set(),
+                chunk_ids=set(),
+                sub_communities=[],
+            )
+        )
+
+        with self.driver.session() as session:
+            # Fetch community data
+            result = session.run(
+                f"""
+                MATCH (n:Entity)
+                WITH n, n.communityIds AS communityIds, [(n)-[]-(m:Entity) | m.entity_id] AS connected_nodes
+                RETURN n.entity_id AS node_id, 
+                       communityIds AS cluster_key,
+                       connected_nodes
+                """
+            )
+
+            for record in result:
+                for index, c_id in enumerate(record["cluster_key"]):
+                    node_id = str(record["node_id"])
+                    level = index
+                    cluster_key = str(c_id)
+                    connected_nodes = record["connected_nodes"]
+
+                    results[cluster_key]["level"] = level
+                    results[cluster_key]["title"] = f"Cluster {cluster_key}"
+                    results[cluster_key]["nodes"].add(node_id)
+                    results[cluster_key]["edges"].update(
+                        [
+                            tuple(sorted([node_id, str(connected)]))
+                            for connected in connected_nodes
+                            if connected != node_id
+                        ]
+                    )
+            for k, v in results.items():
+                v["edges"] = [list(e) for e in v["edges"]]
+                v["nodes"] = list(v["nodes"])
+                v["chunk_ids"] = list(v["chunk_ids"])
+            for cluster in results.values():
+                cluster["sub_communities"] = [
+                    sub_key
+                    for sub_key, sub_cluster in results.items()
+                    if sub_cluster["level"] > cluster["level"]
+                    and set(sub_cluster["nodes"]).issubset(set(cluster["nodes"]))
+                ]
+
+        return dict(results)
+    
+    def generate_community_report(self):
+        communities_schema = self.read_community_schema()
+        for community_key, community in tqdm(
+            communities_schema.items(), desc="generating community report"
+        ):
+            community["report"] = self.gen_single_community_report(community)
+        with open(self.community_path, "w", encoding="utf-8") as file:
+            json.dump(communities_schema, file, indent=4)
+        print("All community report has been generated.")
+
+    def read_community_schema(self) -> dict:
+        try:
+            with open(self.community_path, "r", encoding="utf-8") as file:
+                community_schema = json.load(file)
+        except:
+            raise FileNotFoundError(
+                "Community schema not found. Please make sure to generate it first."
+            )
+        return community_schema
+    
+    def gen_single_community_report(self, community: dict):
+        nodes = community["nodes"]
+        edges = community["edges"]
+        nodes_describe = []
+        edges_describe = []
+        for i in nodes:
+            node = self.get_node_by_id(i)
+            nodes_describe.append({"name": node["name"], "desc": node["description"]})
+        for i in edges:
+            edge = self.get_edges_by_id(i[0], i[1])
+            edges_describe.append(
+                {"source": edge["src"], "target": edge["tar"], "desc": edge["r"]}
+            )
+        nodes_csv = "entity,description\n"
+        for node in nodes_describe:
+            nodes_csv += f"{node['name']},{node['desc']}\n"
+        edges_csv = "source,target,description\n"
+        for edge in edges_describe:
+            edges_csv += f"{edge['source']},{edge['target']},{edge['desc']}\n"
+        data = f"""
+        Text:
+        -----Entities-----
+        ```csv
+        {nodes_csv}
+        ```
+        -----Relationships-----
+        ```csv
+        {edges_csv}
+        ```"""
+        prompt = GEN_COMMUNITY_REPORT.format(input_text=data)
+        report = self.llm.predict(prompt)
+        return report
+    
+    def get_node_by_id(self, node_id):
+        query = """
+        MATCH (n:Entity {entity_id: $node_id})
+        RETURN n
+        """
+        with self.driver.session() as session:
+            result = session.run(query, node_id=node_id)
+            nodes = [record["n"] for record in result]
+        return nodes[0]
+    
+    def get_edges_by_id(self, src, tar):
+        query = """
+        MATCH (n:Entity {entity_id: $src})-[r]-(m:Entity {entity_id: $tar})
+        RETURN {src: n.name, r: r.name, tar: m.name} AS R
+        """
+        with self.driver.session() as session:
+            result = session.run(query, {"src": src, "tar": tar})
+            edges = [record["R"] for record in result]
+        return edges[0]
 
     def get_entity_by_name(self, name):
         query = """
@@ -479,78 +613,6 @@ class TinyGraph:
             chunks.append(self.get_node_chunks(i))
         return chunks
 
-    def gen_community_schema(self) -> dict[str, dict]:
-        results = defaultdict(
-            lambda: dict(
-                level=None,
-                title=None,
-                edges=set(),
-                nodes=set(),
-                chunk_ids=set(),
-                sub_communities=[],
-            )
-        )
-
-        with self.driver.session() as session:
-            # Fetch community data
-            result = session.run(
-                f"""
-                MATCH (n:Entity)
-                WITH n, n.communityIds AS communityIds, [(n)-[]-(m:Entity) | m.entity_id] AS connected_nodes
-                RETURN n.entity_id AS node_id, 
-                       communityIds AS cluster_key,
-                       connected_nodes
-                """
-            )
-
-            max_num_ids = 0
-            for record in result:
-                for index, c_id in enumerate(record["cluster_key"]):
-                    node_id = str(record["node_id"])
-                    level = index
-                    cluster_key = str(c_id)
-                    connected_nodes = record["connected_nodes"]
-
-                    results[cluster_key]["level"] = level
-                    results[cluster_key]["title"] = f"Cluster {cluster_key}"
-                    results[cluster_key]["nodes"].add(node_id)
-                    results[cluster_key]["edges"].update(
-                        [
-                            tuple(sorted([node_id, str(connected)]))
-                            for connected in connected_nodes
-                            if connected != node_id
-                        ]
-                    )
-            for k, v in results.items():
-                v["edges"] = [list(e) for e in v["edges"]]
-                v["nodes"] = list(v["nodes"])
-                v["chunk_ids"] = list(v["chunk_ids"])
-            for cluster in results.values():
-                cluster["sub_communities"] = [
-                    sub_key
-                    for sub_key, sub_cluster in results.items()
-                    if sub_cluster["level"] > cluster["level"]
-                    and set(sub_cluster["nodes"]).issubset(set(cluster["nodes"]))
-                ]
-
-        return dict(results)
-
-    def gen_community(self):
-        self.detect_communities()
-        community_schema = self.gen_community_schema()
-        with open(self.community_path, "w", encoding="utf-8") as file:
-            json.dump(community_schema, file, indent=4)
-
-    def read_community_schema(self) -> dict:
-        try:
-            with open(self.community_path, "r", encoding="utf-8") as file:
-                community_schema = json.load(file)
-        except:
-            raise FileNotFoundError(
-                "Community schema not found. Please make sure to generate it first."
-            )
-        return community_schema
-
     def add_loaded_documents(self, file_path):
         if file_path in self.loaded_documents:
             print(
@@ -560,69 +622,6 @@ class TinyGraph:
         with open(self.doc_path, "a", encoding="utf-8") as file:
             file.write(file_path + "\n")
         self.loaded_documents.add(file_path)
-
-    def get_node_by_id(self, node_id):
-        query = """
-        MATCH (n:Entity {entity_id: $node_id})
-        RETURN n
-        """
-        with self.driver.session() as session:
-            result = session.run(query, node_id=node_id)
-            nodes = [record["n"] for record in result]
-        return nodes[0]
-
-    def get_edges_by_id(self, src, tar):
-        query = """
-        MATCH (n:Entity {entity_id: $src})-[r]-(m:Entity {entity_id: $tar})
-        RETURN {src: n.name, r: r.name, tar: m.name} AS R
-        """
-        with self.driver.session() as session:
-            result = session.run(query, {"src": src, "tar": tar})
-            edges = [record["R"] for record in result]
-        return edges[0]
-
-    def gen_single_community_report(self, community: dict):
-        nodes = community["nodes"]
-        edges = community["edges"]
-        nodes_describe = []
-        edges_describe = []
-        for i in nodes:
-            node = self.get_node_by_id(i)
-            nodes_describe.append({"name": node["name"], "desc": node["description"]})
-        for i in edges:
-            edge = self.get_edges_by_id(i[0], i[1])
-            edges_describe.append(
-                {"source": edge["src"], "target": edge["tar"], "desc": edge["r"]}
-            )
-        nodes_csv = "entity,description\n"
-        for node in nodes_describe:
-            nodes_csv += f"{node['name']},{node['desc']}\n"
-        edges_csv = "source,target,description\n"
-        for edge in edges_describe:
-            edges_csv += f"{edge['source']},{edge['target']},{edge['desc']}\n"
-        data = f"""
-        Text:
-        -----Entities-----
-        ```csv
-        {nodes_csv}
-        ```
-        -----Relationships-----
-        ```csv
-        {edges_csv}
-        ```"""
-        prompt = GEN_COMMUNITY_REPORT.format(input_text=data)
-        report = self.llm.predict(prompt)
-        return report
-
-    def generate_community_report(self):
-        communities_schema = self.read_community_schema()
-        for community_key, community in tqdm(
-            communities_schema.items(), desc="generating community report"
-        ):
-            community["report"] = self.gen_single_community_report(community)
-        with open(self.community_path, "w", encoding="utf-8") as file:
-            json.dump(communities_schema, file, indent=4)
-        print("All community report has been generated.")
 
     def build_local_query_context(self, query):
         query_emb = self.embedding.get_emb(query)
