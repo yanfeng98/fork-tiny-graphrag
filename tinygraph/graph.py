@@ -549,43 +549,6 @@ class TinyGraph:
             file.write(file_path + "\n")
         self.loaded_documents.add(file_path)
 
-    def get_entity_by_name(self, name):
-        query = """
-        MATCH (n:Entity {name: $name})
-        RETURN n
-        """
-        with self.driver.session() as session:
-            result = session.run(query, name=name)
-            entities = [record["n"].get("name") for record in result]
-        return entities[0]
-
-    def map_community_points(self, community_info, query):
-        points_html = self.llm.predict(
-            GLOBAL_MAP_POINTS.format(context_data=community_info, query=query)
-        )
-        points = get_text_inside_tag(points_html, "point")
-        res = []
-        for point in points:
-            try:
-                score = get_text_inside_tag(point, "score")[0]
-                desc = get_text_inside_tag(point, "description")[0]
-                res.append((desc, score))
-            except:
-                continue
-        return res
-
-    def build_global_query_context(self, query, level=1):
-        communities_schema = self.read_community_schema()
-        candidate_community = {}
-        points = []
-        for communityid, community_info in communities_schema.items():
-            if community_info["level"] < level:
-                candidate_community.update({communityid: community_info})
-        for communityid, community_info in candidate_community.items():
-            points.extend(self.map_community_points(community_info["report"], query))
-        points = sorted(points, key=lambda x: x[-1], reverse=True)
-        return points
-
     def local_query(self, query):
         context = self.build_local_query_context(query)
         prompt = LOCAL_QUERY.format(query=query, context=context)
@@ -692,3 +655,31 @@ class TinyGraph:
         prompt = GLOBAL_QUERY.format(query=query, context=context)
         response = self.llm.predict(prompt)
         return response
+
+    def build_global_query_context(self, query, level=1):
+        communities_schema = self.read_community_schema()
+        candidate_community = {}
+        points = []
+        for communityid, community_info in communities_schema.items():
+            if community_info["level"] < level:
+                candidate_community.update({communityid: community_info})
+        for communityid, community_info in candidate_community.items():
+            points.extend(self.map_community_points(community_info["report"], query))
+        points = sorted(points, key=lambda x: x[-1], reverse=True)
+        return points
+    
+    def map_community_points(self, community_info, query):
+        points_html = self.llm.predict(
+            GLOBAL_MAP_POINTS.format(context_data=community_info, query=query)
+        )
+        points = get_text_inside_tag(points_html, "point")
+        res = []
+        for point in points:
+            try:
+                score = get_text_inside_tag(point, "score")[0]
+                desc = get_text_inside_tag(point, "description")[0]
+                res.append((desc, score))
+            except:
+                continue
+        return res
+    
