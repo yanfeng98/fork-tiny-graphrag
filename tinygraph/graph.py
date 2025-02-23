@@ -559,101 +559,6 @@ class TinyGraph:
             entities = [record["n"].get("name") for record in result]
         return entities[0]
 
-    def get_node_edgs(self, node: Node):
-        query = """
-        MATCH (n)-[r]-(m)
-        WHERE n.entity_id = $id
-        RETURN n.name AS n,r.name AS r,m.name AS m
-        """
-        with self.driver.session() as session:
-            result = session.run(query, id=node.entity_id)
-            edges = [(record["n"], record["r"], record["m"]) for record in result]
-        return edges
-
-    def get_node_chunks(self, node):
-        existing_chunks = read_json_file(self.chunk_path)
-        chunks = [existing_chunks[i] for i in node.chunks_id]
-        return chunks
-
-    def get_topk_similar_entities(self, input_emb, k=1) -> List[Node]:
-        res = []
-        query = """
-        MATCH (n)
-        RETURN n
-        """
-        with self.driver.session() as session:
-            result = session.run(query)
-        for record in result:
-            node = record["n"]
-            if node["embedding"] is not None:
-                similarity = cosine_similarity(input_emb, node["embedding"])
-                node = Node(
-                    name=node["name"],
-                    desc=node["description"],
-                    chunks_id=node["chunks_id"],
-                    entity_id=node["entity_id"],
-                    similarity=similarity,
-                )
-                res.append(node)
-        return sorted(res, key=lambda x: x.similarity, reverse=True)[:k]
-
-    def get_communities(self, nodes: List[Node]):
-        communities_schema = self.read_community_schema()
-        res = []
-        nodes_ids = [i.entity_id for i in nodes]
-        for community_id, community_info in communities_schema.items():
-            if set(nodes_ids) & set(community_info["nodes"]):
-                res.append(
-                    {
-                        "community_id": community_id,
-                        "community_info": community_info["report"],
-                    }
-                )
-        return res
-
-    def get_relations(self, nodes: List):
-        res = []
-        for i in nodes:
-            res.append(self.get_node_edgs(i))
-        return res
-
-    def get_chunks(self, nodes):
-        chunks = []
-        for i in nodes:
-            chunks.append(self.get_node_chunks(i))
-        return chunks
-
-    def build_local_query_context(self, query):
-        query_emb = self.embedding.get_emb(query)
-        topk_similar_entities_context = self.get_topk_similar_entities(query_emb)
-        topk_similar_communities_context = self.get_communities(
-            topk_similar_entities_context
-        )
-        topk_similar_relations_context = self.get_relations(
-            topk_similar_entities_context
-        )
-        topk_similar_chunks_context = self.get_chunks(
-            topk_similar_entities_context
-        )
-        return f"""
-        -----Reports-----
-        ```csv
-        {topk_similar_communities_context}
-        ```
-        -----Entities-----
-        ```csv
-        {topk_similar_entities_context}
-        ```
-        -----Relationships-----
-        ```csv
-        {topk_similar_relations_context}
-        ```
-        -----Sources-----
-        ```csv
-        {topk_similar_chunks_context}
-        ```
-        """
-
     def map_community_points(self, community_info, query):
         points_html = self.llm.predict(
             GLOBAL_MAP_POINTS.format(context_data=community_info, query=query)
@@ -686,6 +591,101 @@ class TinyGraph:
         prompt = LOCAL_QUERY.format(query=query, context=context)
         response = self.llm.predict(prompt)
         return response
+    
+    def build_local_query_context(self, query):
+        query_emb = self.embedding.get_emb(query)
+        topk_similar_entities_context = self.get_topk_similar_entities(query_emb)
+        topk_similar_communities_context = self.get_communities(
+            topk_similar_entities_context
+        )
+        topk_similar_relations_context = self.get_relations(
+            topk_similar_entities_context
+        )
+        topk_similar_chunks_context = self.get_chunks(
+            topk_similar_entities_context
+        )
+        return f"""
+        -----Reports-----
+        ```csv
+        {topk_similar_communities_context}
+        ```
+        -----Entities-----
+        ```csv
+        {topk_similar_entities_context}
+        ```
+        -----Relationships-----
+        ```csv
+        {topk_similar_relations_context}
+        ```
+        -----Sources-----
+        ```csv
+        {topk_similar_chunks_context}
+        ```
+        """
+    
+    def get_topk_similar_entities(self, input_emb, k=1) -> List[Node]:
+        res = []
+        query = """
+        MATCH (n)
+        RETURN n
+        """
+        with self.driver.session() as session:
+            result = session.run(query)
+        for record in result:
+            node = record["n"]
+            if node["embedding"] is not None:
+                similarity = cosine_similarity(input_emb, node["embedding"])
+                node = Node(
+                    name=node["name"],
+                    desc=node["description"],
+                    chunks_id=node["chunks_id"],
+                    entity_id=node["entity_id"],
+                    similarity=similarity,
+                )
+                res.append(node)
+        return sorted(res, key=lambda x: x.similarity, reverse=True)[:k]
+    
+    def get_communities(self, nodes: List[Node]):
+        communities_schema = self.read_community_schema()
+        res = []
+        nodes_ids = [i.entity_id for i in nodes]
+        for community_id, community_info in communities_schema.items():
+            if set(nodes_ids) & set(community_info["nodes"]):
+                res.append(
+                    {
+                        "community_id": community_id,
+                        "community_info": community_info["report"],
+                    }
+                )
+        return res
+    
+    def get_relations(self, nodes: List):
+        res = []
+        for i in nodes:
+            res.append(self.get_node_edgs(i))
+        return res
+
+    def get_node_edgs(self, node: Node):
+        query = """
+        MATCH (n)-[r]-(m)
+        WHERE n.entity_id = $id
+        RETURN n.name AS n,r.name AS r,m.name AS m
+        """
+        with self.driver.session() as session:
+            result = session.run(query, id=node.entity_id)
+            edges = [(record["n"], record["r"], record["m"]) for record in result]
+        return edges
+
+    def get_chunks(self, nodes):
+        chunks = []
+        for i in nodes:
+            chunks.append(self.get_node_chunks(i))
+        return chunks
+
+    def get_node_chunks(self, node):
+        existing_chunks = read_json_file(self.chunk_path)
+        chunks = [existing_chunks[i] for i in node.chunks_id]
+        return chunks
 
     def global_query(self, query, level=1):
         context = self.build_global_query_context(query, level)
