@@ -520,6 +520,35 @@ class TinyGraph:
             edges = [record["R"] for record in result]
         return edges[0]
 
+    def add_embedding_for_graph(self):
+        query = """
+        MATCH (n)
+        RETURN n
+        """
+        with self.driver.session() as session:
+            result = session.run(query)
+            for record in result:
+                node = record["n"]
+                description = node["description"]
+                id = node["entity_id"]
+                embedding = self.embedding.get_emb(description)
+                # 更新节点，添加新的 embedding 属性
+                update_query = """
+                MATCH (n {entity_id: $id})
+                SET n.embedding = $embedding
+                """
+                session.run(update_query, id=id, embedding=embedding)
+
+    def add_loaded_documents(self, file_path):
+        if file_path in self.loaded_documents:
+            print(
+                f"Document '{file_path}' has already been loaded, skipping addition to cache."
+            )
+            return
+        with open(self.doc_path, "a", encoding="utf-8") as file:
+            file.write(file_path + "\n")
+        self.loaded_documents.add(file_path)
+
     def get_entity_by_name(self, name):
         query = """
         MATCH (n:Entity {name: $name})
@@ -545,25 +574,6 @@ class TinyGraph:
         existing_chunks = read_json_file(self.chunk_path)
         chunks = [existing_chunks[i] for i in node.chunks_id]
         return chunks
-
-    def add_embedding_for_graph(self):
-        query = """
-        MATCH (n)
-        RETURN n
-        """
-        with self.driver.session() as session:
-            result = session.run(query)
-            for record in result:
-                node = record["n"]
-                description = node["description"]
-                id = node["entity_id"]
-                embedding = self.embedding.get_emb(description)
-                # 更新节点，添加新的 embedding 属性
-                update_query = """
-                MATCH (n {entity_id: $id})
-                SET n.embedding = $embedding
-                """
-                session.run(update_query, id=id, embedding=embedding)
 
     def get_topk_similar_entities(self, input_emb, k=1) -> List[Node]:
         res = []
@@ -601,27 +611,17 @@ class TinyGraph:
                 )
         return res
 
-    def get_relations(self, nodes: List, input_emb):
+    def get_relations(self, nodes: List):
         res = []
         for i in nodes:
             res.append(self.get_node_edgs(i))
         return res
 
-    def get_chunks(self, nodes, input_emb):
+    def get_chunks(self, nodes):
         chunks = []
         for i in nodes:
             chunks.append(self.get_node_chunks(i))
         return chunks
-
-    def add_loaded_documents(self, file_path):
-        if file_path in self.loaded_documents:
-            print(
-                f"Document '{file_path}' has already been loaded, skipping addition to cache."
-            )
-            return
-        with open(self.doc_path, "a", encoding="utf-8") as file:
-            file.write(file_path + "\n")
-        self.loaded_documents.add(file_path)
 
     def build_local_query_context(self, query):
         query_emb = self.embedding.get_emb(query)
@@ -630,10 +630,10 @@ class TinyGraph:
             topk_similar_entities_context
         )
         topk_similar_relations_context = self.get_relations(
-            topk_similar_entities_context, query
+            topk_similar_entities_context
         )
         topk_similar_chunks_context = self.get_chunks(
-            topk_similar_entities_context, query
+            topk_similar_entities_context
         )
         return f"""
         -----Reports-----
