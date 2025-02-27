@@ -1,16 +1,18 @@
-from zhipuai import ZhipuAI
+from ollama import embed
 from typing import List
 from .base import BaseEmb
 
-
-class zhipuEmb(BaseEmb):
-    def __init__(self, model_name: str, api_key: str, **kwargs):
+class ollamaEmb(BaseEmb):
+    def __init__(self, model_name: str, **kwargs):
         super().__init__(model_name=model_name, **kwargs)
-        self.client = ZhipuAI(api_key=api_key)
 
     def get_emb(self, text: str) -> List[float]:
-        emb = self.client.embeddings.create(
-            model=self.model_name,
-            input=text,
-        )
-        return emb.data[0].embedding
+        emb: list[float] = embed(model=self.model_name, input=text).embeddings[0]
+        return emb, len(emb)
+
+if __name__ == "__main__":
+
+    # ollama pull nomic-embed-text
+    emb = ollamaEmb(model_name="nomic-embed-text")
+    # 768
+    print(emb.get_emb("你好"))
