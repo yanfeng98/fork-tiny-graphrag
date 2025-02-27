@@ -25,6 +25,12 @@ cd fork-tiny-graphrag
 pip install -r requirements.txt
 ```
 
+接下来，安装 [Ollama](https://ollama.com/):
+
+```shell
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
 接下来，你需要配置使用的 LLM 和 Embedding 服务。目前我们只支持 zhipu 的 LLM 和 Embedding 服务：
 
 ```python
