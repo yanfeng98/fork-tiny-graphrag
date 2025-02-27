@@ -34,3 +34,9 @@ class ollamaLLM(BaseLLM):
             ]
         )
         return response.message.content
+
+if __name__ == "__main__":
+
+    # ollama run qwen2.5:0.5b
+    llm = ollamaLLM("qwen2.5:0.5b")
+    print(llm.predict("Hello"))
